@@ -1,0 +1,15 @@
+name: 'http-ping'
+
+services:
+  redis:
+    image: redis
+    env_file:
+      - .env
+    ports:
+      - ${REDIS_HOST}:${REDIS_PORT}:6379
+  rabbitmq:
+    image: rabbitmq:3.8.27-management-alpine
+    env_file:
+      - .env
+    ports:
+      - ${RABBITMQ_HOST}:${RABBITMQ_PORT}:5672
