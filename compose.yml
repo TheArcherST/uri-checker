@@ -44,7 +44,7 @@ services:
       - redis
     deploy:
       mode: replicated
-      replicas: 5
+      replicas: 2
   registry:
     image: registry
     ports:

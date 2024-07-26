@@ -69,25 +69,30 @@ class BatchURIDiscoverRequest(BaseModel):
     requests: list[DiscoverURIRequest]
 
 
-def yield_possible_http_resources(request: DiscoverURIRequest) -> list[str]:
+def yield_possible_http_resources(request: DiscoverURIRequest, is_detailed: bool) -> list[str]:
     if request.type == "website":
-        postfixes = [
-            "/",
-            "index",
-            "about",
-        ]
+        if is_detailed:
+            postfixes = [
+                "/",
+                "index",
+                "about",
+            ]
+        else:
+            postfixes = [
+                "/",
+            ]
 
         for i in postfixes:
             yield urljoin(str(validate_url(request.uri)), i)
 
 
 @broker.task
-async def ping_uri(request: DiscoverURIRequest, is_verbose: bool) -> list[HTTPURIAvailability | ICMPURIAvailability]:
+async def ping_uri(request: DiscoverURIRequest, is_verbose: bool, is_detailed: bool) -> list[HTTPURIAvailability | ICMPURIAvailability]:
     tasks = []
     splited = urllib.parse.urlsplit(validate_url(request.uri))
     tasks.append(asyncio.create_task(ping_icmp_uri(splited.netloc, is_verbose=is_verbose)))
-    for i in yield_possible_http_resources(request):
-        task = asyncio.create_task(ping_http_uri(i, is_verbose=is_verbose))
+    for i in yield_possible_http_resources(request, is_detailed=is_detailed):
+        task = asyncio.create_task(ping_http_uri(i, is_verbose=is_verbose, is_detailed=is_detailed))
         tasks.append(task)
 
     results = []
@@ -124,7 +129,8 @@ async def ping_icmp_uri(
 async def ping_http_uri(
         uri: str,
         timeout: int = 2,
-        is_verbose: bool = True
+        is_verbose: bool = True,
+        is_detailed: bool = True,
 ) -> HTTPURIAvailability:
     async with httpx.AsyncClient() as session:
         loop = asyncio.get_running_loop()
@@ -154,12 +160,13 @@ async def ping_http_uri(
 async def root(
         payload: BatchURIDiscoverRequest,
         is_verbose: bool = Query(validation_alias="v", default=True),
+        is_detailed: bool = Query(default=True),
 ):
     tasks = []
     results = []
     for i in payload.requests:
         i: DiscoverURIRequest
-        task = await ping_uri.kiq(i, is_verbose=True)
+        task = await ping_uri.kiq(i, is_verbose=True, is_detailed=is_detailed)
         tasks.append((i, task))
     for request, task in tasks:
         result_ = await task.wait_result()
@@ -191,6 +198,7 @@ async def root(
 async def root_file(
         payload: UploadFile,
         is_verbose: bool = Query(validation_alias="v", default=False),
+        is_detailed: bool = Query(default=False),
 ):
     text = await payload.read()
     uris = text.splitlines()
@@ -203,6 +211,7 @@ async def root_file(
     return await root(
         payload=payload,
         is_verbose=is_verbose,
+        is_detailed=is_detailed,
     )
 
 
