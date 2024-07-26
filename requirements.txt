@@ -1,3 +1,7 @@
 taskiq
 fastapi
-aiohttp
+pydantic
+httpx
+taskiq-aio-pika
+aioping
+taskiq-redis

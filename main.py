@@ -8,10 +8,10 @@ from aioping import ping
 from fastapi import FastAPI, Query, UploadFile
 
 import taskiq
-from taskiq_aio_pika import AioPikaBroker
-from pydantic import BaseModel
+from pydantic import BaseModel, AnyUrl
 import httpx
 
+from broker import broker
 
 app = FastAPI(name="TheArcherST's HTTP ping for FL")
 
@@ -36,7 +36,7 @@ class URIAvailability(BaseModel):
 
 
 class HTTPURIAvailability(URIAvailability):
-    protocol: Protocol = "http"
+    protocol: Protocol = "tcp"
     status_code: int | None
 
 
@@ -54,31 +54,27 @@ class DiscoverURIResponse(BaseModel):
     results: list[HTTPURIAvailability | ICMPURIAvailability]
 
 
+class DiscoverURIShortResponse(BaseModel):
+    uri: str
+    is_icmp_reachable: bool
+    is_http_reachable: bool
+    available_urls: set[AnyUrl]
+
+
 class BatchURIDiscoverResponse(BaseModel):
-    results: list[DiscoverURIResponse]
+    results: list[DiscoverURIResponse | DiscoverURIShortResponse]
 
 
 class BatchURIDiscoverRequest(BaseModel):
     requests: list[DiscoverURIRequest]
 
 
-broker = AioPikaBroker(
-    "amqp://guest:guest@localhost:5672",
-    max_async_tasks=500,
-    max_stored_results=2000,
-    sync_tasks_pool_size=4,
-)
-
-
 def yield_possible_http_resources(request: DiscoverURIRequest) -> list[str]:
     if request.type == "website":
         postfixes = [
             "/",
-            "index.html",
             "index",
-            # "index.php",
-            # "info.html",
-            # "info",
+            "about",
         ]
 
         for i in postfixes:
@@ -89,34 +85,27 @@ def yield_possible_http_resources(request: DiscoverURIRequest) -> list[str]:
 async def ping_uri(request: DiscoverURIRequest, is_verbose: bool) -> list[HTTPURIAvailability | ICMPURIAvailability]:
     tasks = []
     splited = urllib.parse.urlsplit(validate_url(request.uri))
-    tasks.append(await ping_icmp_uri.kiq(splited.netloc, is_verbose=is_verbose))
+    tasks.append(asyncio.create_task(ping_icmp_uri(splited.netloc, is_verbose=is_verbose)))
     for i in yield_possible_http_resources(request):
-        task = await ping_http_uri.kiq(i, is_verbose=is_verbose)
+        task = asyncio.create_task(ping_http_uri(i, is_verbose=is_verbose))
         tasks.append(task)
 
     results = []
     for i in tasks:
-        i: taskiq.AsyncTaskiqTask
-        result = await i.wait_result()
-        resource_availability = result.return_value
+        while not i.done():
+            await asyncio.sleep(0.2)
+        result = i.result()
+        resource_availability = result
         results.append(resource_availability)
 
     return results
 
 
-c = 0
-
-
-@broker.task
 async def ping_icmp_uri(
         uri: str,
         timeout: int = 2,
         is_verbose: bool = True,
 ) -> ICMPURIAvailability:
-    global c
-    print(f"[ICMP] [{uri}]: START")
-    c += 1
-    print(f"[ICMP] [system]: {c} requests in parallel")
     try:
         result = await ping(uri, timeout=timeout)
     except (TimeoutError, OSError):  # todo: handle os error properly os err
@@ -125,43 +114,30 @@ async def ping_icmp_uri(
     else:
         is_reachable = True
         delay = result
-    c -= 1
-    print(f"[ICMP] [system]: {c} requests in parallel")
-    print(f"[ICMP] [{uri}]: DONE")
     return ICMPURIAvailability.model_validate(dict(
         uri=uri,
         is_reachable=is_reachable,
         delay=int(delay * 1000) if delay is not None else None,
     ))
 
-c2 = 0
 
-
-@broker.task
 async def ping_http_uri(
         uri: str,
-        timeout: int = 1,
+        timeout: int = 2,
         is_verbose: bool = True
 ) -> HTTPURIAvailability:
-    global c2
-    print(f"[HTTP] [{uri}]: START")
-    c2 += 1
-    print(f"[HTTP] [system]: {c2} requests in parallel")
     async with httpx.AsyncClient() as session:
         loop = asyncio.get_running_loop()
         started_at = loop.time()
         try:
             response = await session.get(uri, timeout=timeout)
-        except httpx.ConnectTimeout:
+        except httpx.TransportError:
             is_reachable = False
             status_code = None
         else:
             is_reachable = True
-            status_code = response.status
+            status_code = response.status_code
         ended_at = loop.time()
-        c2 -= 1
-        print(f"[HTTP] [{uri}]: DONE")
-        print(f"[HTTP] [system]: {c2} requests in parallel")
 
         return HTTPURIAvailability.model_validate(dict(
             uri=uri,
@@ -187,10 +163,21 @@ async def root(
         tasks.append((i, task))
     for request, task in tasks:
         result_ = await task.wait_result()
-        results.append(DiscoverURIResponse(
-            uri=request.uri,
-            results=result_.return_value,
-        ))
+        results_ = list(result_.return_value)
+        if is_verbose:
+            results.append(DiscoverURIResponse(
+                uri=request.uri,
+                results=results_
+            ))
+        else:
+            results.append(DiscoverURIShortResponse(
+                uri=request.uri,
+                is_icmp_reachable=bool(len([i for i in results_ if i["protocol"] == "icmp"])),
+                is_http_reachable=bool(len([i for i in results_ if i["protocol"] == "tcp"])),
+                available_urls={i["uri"] for i in results_ if
+                                (i["protocol"] == "tcp"
+                                 and ((i["status_code"] or 0) // 100 in (2, 3)))}
+            ))
 
     return BatchURIDiscoverResponse.model_validate(dict(
         results=results,
@@ -217,6 +204,16 @@ async def root_file(
         payload=payload,
         is_verbose=is_verbose,
     )
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    await broker.startup()
+
+
+@app.on_event("shutdown")
+async def on_startup() -> None:
+    await broker.shutdown()
 
 
 def main():
