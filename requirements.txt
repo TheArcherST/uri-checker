@@ -5,3 +5,4 @@ httpx
 taskiq-aio-pika
 aioping
 taskiq-redis
+pydantic-settings
