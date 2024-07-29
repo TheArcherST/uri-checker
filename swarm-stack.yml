@@ -1,6 +1,6 @@
 services:
   taskiq-worker:
-    image: 127.0.0.1:500/uri-discover-taskiq-worker
+    image: 127.0.0.1:5000/uri-discover-taskiq-worker
     command: taskiq worker main:broker
     deploy:
       replicas: 2
