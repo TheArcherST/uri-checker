@@ -404,6 +404,7 @@ async def consume_responses(
         msg = task_result_serializer.loadb(i)
         if msg["is_err"]:
             logger.warning(f"Recieved task with err response: {msg}")
+            continue
         data: URIResponse = msg["return_value"]
         results.extend(data)
     if names:
