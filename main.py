@@ -55,7 +55,7 @@ class URIResponse(BaseModel):
     method: HTTPMethodField
     uri: str
     is_exists: bool | None
-    ips: list[str]
+    ips: list[str] | None
     is_reachable: bool | None
     status_code: int | None
     content_length: int | None
@@ -277,6 +277,7 @@ async def pipeline__dns(
                         12,  # Timeout while contacting DNS servers
                         11,  #
                         10,  # Misformatted DNS reply
+                        8,   # Misformatted domain name
                 ):
                     results.append((i.domain, None))
                     log_level = logging.WARNING
