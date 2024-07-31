@@ -406,6 +406,9 @@ async def consume_responses(
             logger.warning(f"Recieved task with err response: {msg}")
             continue
         data: URIResponse = msg["return_value"]
+        if data is None:
+            logger.error(f"Bad task result: {msg}")
+            continue
         results.extend(data)
     if names:
         await redis.delete(*names)
