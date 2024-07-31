@@ -305,10 +305,11 @@ async def pipeline__dns(
                     f" error `{status}`."
                 )
             else:
-                logger.info(f"DNS Result: {i}")
+                logger.info(f"[DNS] Result: {i}")
                 hosts = [i.host for i in result]
                 results.append((i.domain, hosts))
 
+        logger.info(f"[DNS]: {results=}")
         logger.info(f"[DNS]: {c} finished")
 
         if len(results) >= config.app.http.batch_size:
@@ -320,6 +321,7 @@ async def pipeline__dns(
             await redis.lpush(CONSUME_QUEUE_KEY, task.task_id)
             results = []
     else:
+        print(f"[DNS] (hook): {result=}")
         logger.info(f"{len(results)} domains supplied to http pipeline")
         task = await pipeline__http.kiq(
             domains=results,
