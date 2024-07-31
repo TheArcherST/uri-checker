@@ -86,8 +86,8 @@ async def discover_uri(
         #  CPU cycles.  for this type of optimisation I need to
         #  rewrite this in other language :)
 
+        response = None
         if config.app.http.use_manual_dns:
-            response = None
             if ips is None:
                 return URIResponse(
                     method=method,
@@ -117,6 +117,9 @@ async def discover_uri(
                     if config.app.http.try_all_ips:
                         continue
                     break
+                except ssl.SSLError:
+                    # todo: any error markers?
+                    pass
                 else:
                     break
         else:
@@ -157,10 +160,10 @@ async def discover_uri(
             content_length=response.headers.get("content-length"),
             content=content.decode() or None,
             redirects=(
-                    [
-                        (i.status_code, i.headers.get("location"))
-                        for i in response.history
-                    ]
+                [
+                    (i.status_code, i.headers.get("location"))
+                    for i in response.history
+                ]
             ),
         )
 
@@ -172,6 +175,8 @@ http_limits = httpx.Limits(
 http_transport = httpx.AsyncHTTPTransport(
     limits=http_limits,
 )
+
+logger.info(f"Configuration: {config}")
 
 
 @broker.task
