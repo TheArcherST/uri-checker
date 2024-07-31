@@ -218,7 +218,7 @@ async def pipeline__http(
             result: URIResponse = i.result()
             results.append(result)
 
-        logger.info(f"{c} finished")
+        logger.info(f"[HTTP]: {c} finished")
     logger.info("Return results!")
     return results
 
@@ -305,10 +305,11 @@ async def pipeline__dns(
                     f" error `{status}`."
                 )
             else:
+                logger.info(f"DNS Result: {i}")
                 hosts = [i.host for i in result]
                 results.append((i.domain, hosts))
 
-        logger.info(f"{c} finished")
+        logger.info(f"[DNS]: {c} finished")
 
         if len(results) >= config.app.http.batch_size:
             logger.info(f"{len(results)} domains supplied to http pipeline")
