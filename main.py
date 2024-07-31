@@ -267,7 +267,7 @@ async def pipeline__dns(
     for i in domains:
         task = resolver.query(i.strip(), "A")
         tasks.append(task)
-        task.domain = i
+        task.domain = i.strip()
 
     while tasks:
         await asyncio.sleep(0.2)
@@ -305,7 +305,7 @@ async def pipeline__dns(
                     f" error `{status}`."
                 )
             else:
-                logger.info(f"[DNS] Result: {i}")
+                logger.info(f"[DNS] Result: {i!r} for domain {i.domain}")
                 hosts = [i.host for i in result]
                 results.append((i.domain, hosts))
 
@@ -321,7 +321,7 @@ async def pipeline__dns(
             await redis.lpush(CONSUME_QUEUE_KEY, task.task_id)
             results = []
     else:
-        print(f"[DNS] (hook): {result=}")
+        logger.info(f"[DNS] (hook): {result=}")
         logger.info(f"{len(results)} domains supplied to http pipeline")
         task = await pipeline__http.kiq(
             domains=results,
