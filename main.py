@@ -86,6 +86,8 @@ async def discover_uri(
         #  CPU cycles.  for this type of optimisation I need to
         #  rewrite this in other language :)
 
+        ips = list(ips)
+
         response = None
         if config.app.http.use_manual_dns:
             if ips is None:
