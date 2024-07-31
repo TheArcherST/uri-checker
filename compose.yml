@@ -13,7 +13,7 @@ services:
     image: rabbitmq:3.8.27-management-alpine
     ports:
       - ${COMPOSE__RABBITMQ__HOST}:${COMPOSE__RABBITMQ__PORT}:5672
-      - ${COMPOSE__RABBITMQ__HOST}:${COMPOSE__RABBITMQ__PORT__2}:15672
+      - ${COMPOSE__RABBITMQ__HOST}:${COMPOSE__RABBITMQ__PORT_2}:15672
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
   web:
