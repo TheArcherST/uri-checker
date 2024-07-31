@@ -12,7 +12,7 @@ broker = (
         f"@{config.rabbitmq.host}:{config.rabbitmq.port}",
         # todo: indicate remaining results space to roducer
         max_stored_results=200_000,
-        sync_tasks_pool_size=4,
+        sync_tasks_pool_size=2,
     )
     .with_result_backend(RedisAsyncResultBackend(
         f"redis://{config.redis.host}:{config.redis.port}/1",
