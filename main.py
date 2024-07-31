@@ -92,7 +92,7 @@ async def discover_uri(
                 return URIResponse(
                     method=method,
                     uri=uri,
-                    is_exists=True,
+                    is_exists=False,
                     ips=None,
                     is_reachable=None,
                     status_code=None,
