@@ -401,7 +401,7 @@ async def consume_responses(
 
     # todo: ensure that consumer recieved data before remove keys and
     #  values
-    names = await redis.lpop(CONSUME_QUEUE_KEY, int(limit / config.app.http.batch_size))
+    names = await redis.rpop(CONSUME_QUEUE_KEY, int(limit / config.app.http.batch_size))
     if names is None:
         names = []
     for name, i in zip(names, await redis.mget(names)):
