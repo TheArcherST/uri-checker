@@ -66,6 +66,7 @@ class URIResponse(BaseModel):
 
 class DiscoverResponse(BaseModel):
     results: list[URIResponse]
+    consume_queue_len: int
 
 
 async def discover_uri(
@@ -327,23 +328,6 @@ async def pipeline__dns(
     return None
 
 
-@broker.task
-async def discover_uris(
-        request: DiscoverRequests,
-) -> DiscoverResponse:
-    tasks = []
-    results = []
-
-    for i in tasks:
-        while not i.done():
-            await asyncio.sleep(0.2)
-        result = i.result()
-        resource_availability = result
-        results.append(resource_availability)
-
-    return results
-
-
 class PingFeedRequest(BaseModel):
     request: DiscoverRequests
 
@@ -387,9 +371,6 @@ async def feed_requests(
     )
 
 
-ping_consume_lock = asyncio.Lock()
-
-
 @app.post(
     "/ping/consume",
     response_model=DiscoverResponse,
@@ -421,6 +402,7 @@ async def consume_responses(
         await redis.delete(*names)
     response = DiscoverResponse(
         results=results,
+        consume_queue_len=await redis.llen(CONSUME_QUEUE_KEY),
     )
     return response
 
