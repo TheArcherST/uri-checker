@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import ssl
 from itertools import islice
 from typing import Literal, Iterable
 
@@ -119,13 +120,19 @@ async def discover_uri(
                 else:
                     break
         else:
-            response = await client.request(
-                method, httpx.URL(
-                    scheme="https",
-                    host=uri,
-                    path="/",
-                ),
-            )
+            try:
+                response = await client.request(
+                    method, httpx.URL(
+                        scheme="https",
+                        host=uri,
+                        path="/",
+                    ),
+                )
+            except httpx.TransportError:
+                pass
+            except ssl.SSLError:
+                # todo: any error markers?
+                pass
 
         if response is None:
             return URIResponse(
