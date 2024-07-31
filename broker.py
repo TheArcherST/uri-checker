@@ -1,10 +1,6 @@
-from typing import Any
-
-from pydantic import BaseModel
 from taskiq_aio_pika import AioPikaBroker
 from taskiq_redis import RedisAsyncResultBackend
-from taskiq.serializers import JSONSerializer, PickleSerializer
-from taskiq.abc.serializer import TaskiqSerializer
+from taskiq.serializers import PickleSerializer
 from config import config
 
 

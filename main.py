@@ -48,7 +48,7 @@ redis = Redis(
 
 class DiscoverRequests(BaseModel):
     method: HTTPMethodField
-    uris: tuple[URIField]
+    uris: list[URIField]
 
 
 class URIResponse(BaseModel):
