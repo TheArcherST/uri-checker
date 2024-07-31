@@ -282,14 +282,12 @@ async def pipeline__dns(
                     results.append((i.domain, None))
                     log_level = logging.WARNING
                 else:
-                    log_level = logging.CRITICAL
+                    log_level = logging.ERROR
                 logger.log(
                     log_level,
                     f"Domain name {i.domain} not handled because of DNS"
                     f" error `{status}`."
                 )
-                if log_level == logging.CRITICAL:
-                    raise
             else:
                 hosts = [i.host for i in result]
                 results.append((i.domain, hosts))
