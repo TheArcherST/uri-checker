@@ -70,6 +70,7 @@ broker = (
     .with_result_backend(RedisAsyncResultBackend(
         f"redis://{config.redis.host}:{config.redis.port}/1",
         serializer=task_result_serializer,
+        timeout=50,
     ))
     .with_middlewares(URICheckReportsRegistryMiddleware(
     ))
