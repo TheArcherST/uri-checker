@@ -56,7 +56,7 @@ class CheckerConsumeResponse(BaseModel):
     pending: int
 
 
-class GetVitialsResponse(BaseModel):
+class GetStatusResponse(BaseModel):
     pending_consume: int
 
 
@@ -119,16 +119,16 @@ async def apply_consume(
 
 
 @app.get(
-    "/vitials",
-    response_model=GetVitialsResponse,
+    "/resolver/status",
+    response_model=GetStatusResponse,
 )
-async def consume_responses(
+async def get_status(
 ):
     pending_consume = await redis.get(RedisKeys.CONSUME_QUEUE_ITEMS_COUNT)
     if pending_consume is None:
         pending_consume = "0"
 
-    return GetVitialsResponse(
+    return GetStatusResponse(
         pending_consume=pending_consume,
     )
 
