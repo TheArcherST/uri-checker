@@ -1,6 +1,8 @@
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from protocol import HTTPMethodField
+
 
 class RedisConfig(BaseModel):
     host: str
@@ -21,6 +23,7 @@ class HTTPTransportConfig(BaseModel):
 
 
 class HTTPConfig(BaseModel):
+    method: HTTPMethodField
     batch_size: int
     reuse_session: bool
     global_transport: bool

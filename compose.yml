@@ -1,4 +1,4 @@
-name: 'uri-discover-compose'
+name: 'uri-checker-compose'
 
 services:
   redis:
@@ -18,7 +18,7 @@ services:
       - rabbitmq-data:/var/lib/rabbitmq
   web:
     restart: unless-stopped
-    image: 127.0.0.1:5000/uri-discover-web
+    image: 127.0.0.1:5000/uri-checker-web
     build:
       context: .
     env_file:
@@ -33,7 +33,7 @@ services:
     restart: unless-stopped
     profiles:
       - dev
-    image: 127.0.0.1:5000/uri-discover-taskiq-worker
+    image: 127.0.0.1:5000/uri-checker-taskiq-worker
     build:
       context: .
     env_file:

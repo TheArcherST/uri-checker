@@ -8,3 +8,4 @@ taskiq-redis
 pydantic-settings
 uvicorn
 aiodns
+python-multipart

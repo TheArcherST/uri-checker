@@ -1,28 +1,27 @@
-import asyncio
-import json
-import logging
-import ssl
 from itertools import islice
-from typing import Literal, Iterable
+from typing import Literal, Coroutine, Union, Any
 
-import aiodns
-import httpx
+import taskiq
 import uvicorn
-from fastapi import FastAPI, UploadFile, Query
-from fastapi.openapi.models import Response
+from fastapi import FastAPI, UploadFile
 from redis.asyncio import Redis
 from logging import getLogger
 
 from pydantic import BaseModel
-from starlette.responses import JSONResponse
+from taskiq import TaskiqMessage, TaskiqResult
 
-from broker import broker, task_result_serializer
+from broker import broker, task_result_serializer, redis, CONSUME_QUEUE_KEY
 from config import config
 
-logger = getLogger(__name__)
+from protocol import (
+    URICheckReport
+)
+from resolvers import (
+    dns_resolver,
+)
 
-CONSUME_QUEUE_KEY = "consume_queue"
 
+logger = getLogger("MAIN")
 
 app = FastAPI(name="TheArcherST's HTTP ping for FL")
 
@@ -40,187 +39,17 @@ type URIField = str
 type HTTPMethodField = Literal["HEAD", "GET"]
 
 
-redis = Redis(
-    host=config.redis.host,
-    port=config.redis.port,
-    db=1,
-)
-
-
-class DiscoverRequests(BaseModel):
-    method: HTTPMethodField
+class CheckerFeedRequest(BaseModel):
     uris: list[URIField]
 
 
-class URIResponse(BaseModel):
-    method: HTTPMethodField
-    uri: str
-    is_exists: bool | None
-    ips: list[str] | None
-    is_reachable: bool | None
-    status_code: int | None
-    content_length: int | None
-    content: str | None = None
-    redirects: list[tuple[int, str]] | None
+class CheckerFeedResponse(BaseModel):
+    pass
 
 
-class DiscoverResponse(BaseModel):
-    results: list[URIResponse]
+class CheckerConsumeResponse(BaseModel):
+    results: list[URICheckReport]
     consume_queue_len: int
-
-
-async def discover_uri(
-        transport: httpx.AsyncHTTPTransport,
-        uri: str,
-        ips: Iterable[str] | None,
-        method: HTTPMethodField,
-) -> URIResponse:
-    async with httpx.AsyncClient(
-        transport=transport,
-        follow_redirects=True,
-    ) as client:
-        # redirects in general can't be optimized to be parallel etc.
-        #  the only external optimisation is possible if domain name
-        #  is already resolved and/or connection to this ip is already
-        #  established in transport pool.  also I've rejected any
-        #  attempts to use lower layer in order to optimize using
-        #  CPU cycles.  for this type of optimisation I need to
-        #  rewrite this in other language :)
-
-        if ips is not None:
-            ips = list(ips)
-
-        response = None
-        if config.app.http.use_manual_dns:
-            if ips is None:
-                return URIResponse(
-                    method=method,
-                    uri=uri,
-                    is_exists=False,
-                    ips=None,
-                    is_reachable=None,
-                    status_code=None,
-                    content_length=None,
-                    content=None,
-                    redirects=None,
-                )
-
-            for i in ips:
-                try:
-                    response = await client.request(
-                        method, httpx.URL(
-                            scheme="https",
-                            host=i,
-                            path="/",
-                        ),
-                        extensions=dict(
-                            sni_hostname=uri,
-                        ),
-                    )
-                except httpx.TransportError:
-                    if config.app.http.try_all_ips:
-                        continue
-                    break
-                except ssl.SSLError:
-                    # todo: any error markers?
-                    pass
-                else:
-                    break
-        else:
-            try:
-                response = await client.request(
-                    method, httpx.URL(
-                        scheme="https",
-                        host=uri,
-                        path="/",
-                    ),
-                )
-            except httpx.TransportError:
-                pass
-            except ssl.SSLError:
-                # todo: any error markers?
-                pass
-
-        if response is None:
-            return URIResponse(
-                method=method,
-                uri=uri,
-                is_exists=True,
-                ips=ips,
-                is_reachable=False,
-                status_code=None,
-                content_length=None,
-                content=None,
-                redirects=None,
-            )
-        content = await response.aread()
-        return URIResponse(
-            method=method,
-            uri=uri,
-            is_exists=ips is not None,
-            ips=ips,
-            is_reachable=True,
-            status_code=response.status_code,
-            content_length=response.headers.get("content-length"),
-            content=content.decode() or None,
-            redirects=(
-                [
-                    (i.status_code, i.headers.get("location"))
-                    for i in response.history
-                ]
-            ),
-        )
-
-
-http_limits = httpx.Limits(
-    max_connections=config.app.http.transport.max_connections,
-    max_keepalive_connections=config.app.http.transport.max_keppalive_connections,
-)
-http_transport = httpx.AsyncHTTPTransport(
-    limits=http_limits,
-)
-
-logger.info(f"Configuration: {config}")
-
-
-@broker.task
-async def pipeline__http(
-        domains: list[tuple[str, Iterable[str] | None]],
-        method: HTTPMethodField,
-) -> list[URIResponse]:
-    tasks = []
-
-    if not config.app.http.global_transport:
-        current_http_transport = httpx.HTTPTransport(
-            limits=http_limits,
-        )
-    else:
-        current_http_transport = http_transport
-
-    for domain, ips, in domains:
-        tasks.append(asyncio.create_task(discover_uri(
-            transport=current_http_transport,
-            uri=domain,
-            ips=ips,
-            method=method,
-        )))
-
-    results = []
-    while tasks:
-        await asyncio.sleep(0.2)
-        c = 0
-        for i in tasks.copy():
-            if not i.done():
-                continue
-            tasks.remove(i)
-            c += 1
-
-            result: URIResponse = i.result()
-            results.append(result)
-
-        logger.info(f"[HTTP]: {c} finished")
-    logger.info("Return results!")
-    return results
 
 
 def batched(iterable, n):
@@ -232,143 +61,32 @@ def batched(iterable, n):
         yield batch
 
 
-@broker.task
-async def pipeline__dns(
-        domains: list[str],
-        method: HTTPMethodField,
-) -> None:
-    results = list()
-    resolver = aiodns.DNSResolver(
-        [
-            "92.53.116.26",
-            "92.53.98.100",
-            "139.45.232.67",
-            "139.45.249.139",
-            "8.8.8.8",
-            "8.8.4.4",
-            "1.1.1.1",
-            "1.0.0.1",
-            "9.9.9.9",
-            "149.112.112.112",
-            "76.76.2.0",
-            "76.76.10.0",
-            "76.76.19.19",
-            "76.223.122.150",
-            "185.228.168.9",
-            "185.228.169.9",
-        ],
-        timeout=config.app.dns.timeout,
-        tries=config.app.dns.tries,
-    )
-
-    tasks = []
-    domains = list(domains)
-
-    for i in domains:
-        task = resolver.query(i.strip(), "A")
-        tasks.append(task)
-        task.domain = i.strip()
-
-    while tasks:
-        await asyncio.sleep(0.2)
-        c = 0
-        for i in tasks.copy():
-            if not i.done():
-                continue
-            tasks.remove(i)
-            c += 1
-            log_level = logging.DEBUG
-            try:
-                result = i.result()
-            except aiodns.error.DNSError as e:
-                status, message = e.args
-                if status == 1:
-                    # domain name not found
-                    # result is an empty set
-                    results.append((i.domain, set()))
-                elif status == 4:
-                    # domain name not exits
-                    results.append((i.domain, None))
-                elif status in (
-                        12,  # Timeout while contacting DNS servers
-                        11,  #
-                        10,  # Misformatted DNS reply
-                        8,   # Misformatted domain name
-                ):
-                    results.append((i.domain, None))
-                    log_level = logging.WARNING
-                else:
-                    log_level = logging.ERROR
-                logger.log(
-                    log_level,
-                    f"Domain name {i.domain} not handled because of DNS"
-                    f" error `{status}`."
-                )
-            else:
-                logger.info(f"[DNS] Result: {i!r} for domain {i.domain}")
-                hosts = [i.host for i in result]
-                results.append((i.domain, hosts))
-
-        logger.info(f"[DNS]: {results=}")
-        logger.info(f"[DNS]: {c} finished")
-
-        if len(results) >= config.app.http.batch_size:
-            logger.info(f"{len(results)} domains supplied to http pipeline")
-            task = await pipeline__http.kiq(
-                domains=results,
-                method=method,
-            )
-            await redis.lpush(CONSUME_QUEUE_KEY, task.task_id)
-            results = []
-    else:
-        logger.info(f"[DNS] (hook): {result=}")
-        logger.info(f"{len(results)} domains supplied to http pipeline")
-        task = await pipeline__http.kiq(
-            domains=results,
-            method=method,
-        )
-        await redis.lpush(CONSUME_QUEUE_KEY, task.task_id)
-
-    return None
-
-
-class PingFeedRequest(BaseModel):
-    request: DiscoverRequests
-
-
-class PingFeedResponse(BaseModel):
-    pass
-
-
 @app.post(
-    "/ping/feed",
-    response_model=PingFeedResponse,
+    "/checker/feed",
+    response_model=CheckerFeedResponse,
 )
 async def ping_feed(
-        payload: PingFeedRequest,
+        payload: CheckerFeedRequest,
 ):
-    for i in batched(payload.request.uris, config.app.dns.batch_size):
-        await pipeline__dns.kiq(domains=i, method=payload.request.method)
+    for i in batched(payload.uris, config.app.dns.batch_size):
+        payload = [URICheckReport(uri=j) for j in i]
+        await dns_resolver.kiq(payload=payload)
 
-    return PingFeedResponse(
+    return CheckerFeedResponse(
     )
 
 
 @app.post(
-    "/ping/feed/file",
-    response_model=PingFeedResponse,
+    "/checker/feed/file",
+    response_model=CheckerFeedResponse,
 )
 async def feed_requests(
         payload: UploadFile,
-        method: HTTPMethodField = Query(default="HEAD"),
 ):
     text = await payload.read()
     uris = text.splitlines()
-    internal_payload = PingFeedRequest(
-        request=DiscoverRequests(
-            method=method,
-            uris=uris,
-        )
+    internal_payload = CheckerFeedRequest(
+        uris=uris,
     )
     return await ping_feed(
         payload=internal_payload,
@@ -377,7 +95,7 @@ async def feed_requests(
 
 @app.post(
     "/ping/consume",
-    response_model=DiscoverResponse,
+    response_model=CheckerConsumeResponse,
 )
 async def consume_responses(
         limit: int = 1_000,
@@ -397,14 +115,14 @@ async def consume_responses(
         if msg["is_err"]:
             logger.warning(f"Recieved task with err response: {msg}")
             continue
-        data: URIResponse = msg["return_value"]
+        data: list[URICheckReport] = msg["return_value"]
         if data is None:
             logger.error(f"Bad task result: {msg}")
             continue
         results.extend(data)
     if names:
         await redis.delete(*names)
-    response = DiscoverResponse(
+    response = CheckerConsumeResponse(
         results=results,
         consume_queue_len=await redis.llen(CONSUME_QUEUE_KEY),
     )
