@@ -56,7 +56,6 @@ class CheckerConsumeResponse(BaseModel):
     pending: int
 
 
-
 @app.post(
     "/checker/feed",
     response_model=CheckerFeedResponse,
@@ -65,8 +64,8 @@ async def ping_feed(
         payload: CheckerFeedRequest,
 ):
     for i in batched(payload.uris, config.app.dns.batch_size):
-        payload = [URICheckReport(uri=j) for j in i]
-        await dns_resolver.kiq(payload=payload)
+        task_payload = [URICheckReport(uri=j) for j in i]
+        await dns_resolver.kiq(payload=task_payload)
 
     return CheckerFeedResponse(
         queued_count=len(payload.uris),
