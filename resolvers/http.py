@@ -208,13 +208,18 @@ async def discover_uri(
                 resolve_error = e
 
         if response is None:
+            if resolve_error is not None:
+                detail = resolve_error.detail
+            else:
+                detail = None
+
             return HTTPResult(
                 method=method,
                 status_code=None,
                 content_length=None,
                 content=None,
                 redirects=None,
-                detail=resolve_error and resolve_error.detail,
+                detail=detail,
             )
         content = await response.aread()
         return HTTPResult(
