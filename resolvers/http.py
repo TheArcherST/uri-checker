@@ -121,7 +121,7 @@ async def discover_uri(
                         ),
                         headers={
                             "host": uri,
-                        }
+                        },
                         extensions=dict(
                             sni_hostname=uri,
                         ),
