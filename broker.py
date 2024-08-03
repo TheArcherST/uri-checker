@@ -1,12 +1,32 @@
+from typing import Iterable
+
 import taskiq
 from redis.asyncio import Redis
+from taskiq import TaskiqResult
 from taskiq_aio_pika import AioPikaBroker
 from taskiq_redis import RedisAsyncResultBackend
 from taskiq.serializers import PickleSerializer
 from config import config
 
 
-CONSUME_QUEUE_KEY = "consume_queue"
+class RedisKeys:
+    CONSUME_QUEUE = "consume_queue"
+    """
+    List of pointers to tasks
+    """
+
+    CONSUME_QUEUE_TRAILING_INDEX = "consume_queue_trailing_index"
+    """
+    Uses for pointing on index in internal represeentation of last
+    member of consume queue, is member was not consumed complitely.
+    """
+
+    CONSUME_QUEUE_ITEMS_COUNT = "consume_queue_items_count"
+    """
+    Not just count of task results to be consumed but total count of 
+    reports that wainitng for consume.  This value increasing by
+    workers.
+    """
 
 
 redis = Redis(
@@ -22,9 +42,19 @@ class URICheckReportsRegistryMiddleware(taskiq.TaskiqMiddleware):
         message: "TaskiqMessage",
         result: "TaskiqResult[Any]",
     ) -> "Union[None, Coroutine[Any, Any, None]]":
-        if result is None:
+        from protocol import URICheckReport
+
+        if result.return_value is None:
             return
-        await redis.lpush(CONSUME_QUEUE_KEY, message.task_id)
+        if not isinstance(result.return_value, list):
+            return
+        if len(result.return_value) == 0:
+            return
+        if not isinstance(result.return_value[0], URICheckReport):
+            return
+
+        await redis.lpush(RedisKeys.CONSUME_QUEUE, message.task_id)
+        await redis.incrby(RedisKeys.CONSUME_QUEUE_ITEMS_COUNT, len(result.return_value))
 
 
 task_result_serializer = PickleSerializer()

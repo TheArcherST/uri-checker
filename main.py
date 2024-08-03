@@ -1,16 +1,15 @@
-from itertools import islice
-from typing import Literal, Coroutine, Union, Any
+from itertools import batched
+from typing import Literal
 
-import taskiq
 import uvicorn
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI, UploadFile, BackgroundTasks
 from redis.asyncio import Redis
 from logging import getLogger
 
 from pydantic import BaseModel
-from taskiq import TaskiqMessage, TaskiqResult
+from redis.asyncio.lock import Lock
 
-from broker import broker, task_result_serializer, redis, CONSUME_QUEUE_KEY
+from broker import broker, task_result_serializer, RedisKeys
 from config import config
 
 from protocol import (
@@ -23,9 +22,7 @@ from resolvers import (
 
 logger = getLogger("MAIN")
 
-app = FastAPI(name="TheArcherST's HTTP ping for FL")
-
-Protocol = Literal["icmp", "tcp", "udp"]
+app = FastAPI(title="URI Checker")
 
 
 def validate_url(url: str):
@@ -39,6 +36,13 @@ type URIField = str
 type HTTPMethodField = Literal["HEAD", "GET"]
 
 
+redis = Redis(
+    host=config.redis.host,
+    port=config.redis.port,
+    db=1,
+)
+
+
 class CheckerFeedRequest(BaseModel):
     uris: list[URIField]
 
@@ -49,16 +53,8 @@ class CheckerFeedResponse(BaseModel):
 
 class CheckerConsumeResponse(BaseModel):
     results: list[URICheckReport]
-    consume_queue_len: int
+    pending: int
 
-
-def batched(iterable, n):
-    # batched('ABCDEFG', 3) → ABC DEF G
-    if n < 1:
-        raise ValueError('n must be at least one')
-    iterator = iter(iterable)
-    while batch := tuple(islice(iterator, n)):
-        yield batch
 
 
 @app.post(
@@ -93,40 +89,107 @@ async def feed_requests(
     )
 
 
+consume_lock = Lock(redis, name="web_consume_lock")
+
+
+async def apply_consume(
+        consumed_names: list[str],
+        consumed_items_count: int,
+        trailing_index: int,
+):
+    try:
+        await redis.lpop(RedisKeys.CONSUME_QUEUE, len(consumed_names))
+
+        if consumed_names:
+            await redis.delete(*consumed_names)
+
+        if trailing_index is None:
+            await redis.delete(RedisKeys.CONSUME_QUEUE_TRAILING_INDEX)
+        else:
+            await redis.set(RedisKeys.CONSUME_QUEUE_TRAILING_INDEX, trailing_index)
+
+        await redis.decrby(RedisKeys.CONSUME_QUEUE_ITEMS_COUNT, consumed_items_count)
+    finally:
+        await consume_lock.release()
+
+
 @app.post(
     "/ping/consume",
     response_model=CheckerConsumeResponse,
 )
 async def consume_responses(
+        background_tasks: BackgroundTasks,
         limit: int = 1_000,
 ):
-    results = []
+    await consume_lock.acquire()
+    try:
+        results = []
+        consumed_names = []
+        remaining_items_quota = limit
 
-    # todo: ensure that consumer recieved data before remove keys and
-    #  values
-    names = await redis.rpop(CONSUME_QUEUE_KEY, int(limit / config.app.http.batch_size))
-    if names is None:
-        names = []
-    for name, i in zip(names, await redis.mget(names)):
-        if i is None:
-            names.remove(name)
-            continue
-        msg = task_result_serializer.loadb(i)
-        if msg["is_err"]:
-            logger.warning(f"Recieved task with err response: {msg}")
-            continue
-        data: list[URICheckReport] = msg["return_value"]
-        if data is None:
-            logger.error(f"Bad task result: {msg}")
-            continue
-        results.extend(data)
-    if names:
-        await redis.delete(*names)
-    response = CheckerConsumeResponse(
-        results=results,
-        consume_queue_len=await redis.llen(CONSUME_QUEUE_KEY),
-    )
-    return response
+        trailing_index = await redis.get(RedisKeys.CONSUME_QUEUE_TRAILING_INDEX)
+        initial_trailing_index = trailing_index
+        all_names = await redis.lrange(
+            RedisKeys.CONSUME_QUEUE,
+            0, -1,
+        )
+        if all_names is None:
+            all_names = []
+        for name in all_names:
+            # I think that latency here will be so small that
+            #  conviency is prefered than bulk optimisations profit.
+
+            data = await redis.get(name)
+            data = task_result_serializer.loadb(data)
+            data = data["return_value"]
+            if trailing_index is not None:
+                trailing_index = int(trailing_index)
+                data = data[trailing_index:]
+                trailing_index = None
+
+            remaining_items_quota -= len(data)
+
+            if remaining_items_quota == 0:
+                new_trailing_index = None
+                results.extend(data)
+                consumed_names.append(name)
+                break
+            elif remaining_items_quota < 0:
+                data = data[:remaining_items_quota]
+                results.extend(data)
+                new_trailing_index = len(data)
+                if initial_trailing_index is not None:
+                    new_trailing_index += int(initial_trailing_index)
+                break
+            else:
+                consumed_names.append(name)
+                results.extend(data)
+        else:
+            new_trailing_index = None
+
+        background_tasks.add_task(
+            apply_consume,
+            consumed_names=consumed_names,
+            consumed_items_count=len(results),
+            trailing_index=new_trailing_index,
+        )
+        total_items_count = await redis.get(RedisKeys.CONSUME_QUEUE_ITEMS_COUNT)
+
+        if total_items_count is None:
+            total_items_count = "0"
+        total_items_count = int(total_items_count)
+
+        pending = total_items_count - len(results)
+        response = CheckerConsumeResponse(
+            results=results,
+            pending=pending,
+        )
+        return response
+    except BaseException:
+        # note: background task will not be run due error, so you need
+        #  to release lock in order to prevent deadlock
+        await consume_lock.release()
+        raise
 
 
 @app.on_event("startup")

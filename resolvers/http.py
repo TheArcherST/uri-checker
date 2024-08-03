@@ -60,7 +60,6 @@ async def http_resolver(
             method=config.app.http.method,
         ))))
 
-    results = []
     while tasks:
         await asyncio.sleep(0.1)
         c = 0
@@ -71,9 +70,8 @@ async def http_resolver(
             c += 1
 
             result: HTTPResult = i[1].result()
+            logger.info(f"{result=}")
             i[0].http = result
-            results.append(result)
-
         logger.info(f"{c} finished")
     logger.info("Return results!")
     return payload
@@ -103,6 +101,7 @@ async def discover_uri(
         response = None
         if config.app.http.use_manual_dns:
             if ips is None:
+                logger.debug(f"IPS if none so skip HTTP for {uri}")
                 return HTTPResult(
                     method=method,
                     status_code=None,
@@ -112,6 +111,7 @@ async def discover_uri(
                 )
 
             for i in ips:
+                logger.debug(f"Try ip {i} for {uri}")
                 try:
                     response = await client.request(
                         method, httpx.URL(
@@ -126,15 +126,19 @@ async def discover_uri(
                             sni_hostname=uri,
                         ),
                     )
-                except httpx.TransportError:
+                except httpx.TransportError as e:
+                    logger.warning(f"Transport error for {uri} - {e}")
                     if config.app.http.try_all_ips:
                         continue
                     break
                 except ssl.SSLError:
                     # todo: any error markers?
+                    logger.warning(f"SSL error for {uri} - {e}")
                     pass
                 else:
                     break
+            else:
+                logger.warning(f"Not one ip from {ips} not work for {uri}")
         else:
             try:
                 response = await client.request(
