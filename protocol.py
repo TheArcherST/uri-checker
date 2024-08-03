@@ -12,7 +12,7 @@ class CheckURIsRequest(BaseModel):
 
 
 class DNSResult(BaseModel):
-    status_code: int
+    status: int
     ips: list[str] | None
 
 

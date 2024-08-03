@@ -115,7 +115,7 @@ async def dns_resolver(
                 logger.info(f"[DNS] Result: {i!r} for domain {current_report.uri}")
                 hosts = [j.host for j in result]
                 current_report.dns = DNSResult(
-                    status_code=0,
+                    status=0,
                     ips=hosts,
                 )
                 reports_pending_http.append(current_report)
