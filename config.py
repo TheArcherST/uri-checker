@@ -24,6 +24,7 @@ class HTTPTransportConfig(BaseModel):
 
 class HTTPConfig(BaseModel):
     method: HTTPMethodField
+    max_redirects: int
     batch_size: int
     reuse_session: bool
     global_transport: bool

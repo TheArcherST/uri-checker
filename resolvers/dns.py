@@ -3,6 +3,7 @@ from typing import Annotated
 import logging
 
 import aiodns
+from idna import InvalidCodepoint
 from taskiq import (
     TaskiqDepends,
     Context,
@@ -53,9 +54,21 @@ async def dns_resolver(
     tasks = []
 
     for i in payload:
-        task = resolver.query(i.uri, "A")
-        tasks.append(task)
-        task.report = i
+        try:
+            task = resolver.query(i.uri, "A")
+        except InvalidCodepoint as e:
+            i.dns = DNSResult(
+                status=-1,
+                ips=None,
+            )
+            finished_reports.append(i)
+            logger.error(
+                f"Domain name {i.uri} not handled because of "
+                f" domain name is invalid: {e}"
+            )
+        else:
+            tasks.append(task)
+            task.report = i
 
     while tasks:
         await asyncio.sleep(0.1)

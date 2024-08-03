@@ -7,6 +7,7 @@ from typing import (
 
 import logging
 import taskiq.events
+from httpx import Response
 from taskiq import (
     Context,
     TaskiqDepends, TaskiqState,
@@ -77,6 +78,67 @@ async def http_resolver(
     return payload
 
 
+class HTTPResolveError(Exception):
+    def __init__(self, original: Exception, detail: str, log_level: int):
+        self.original = original
+        self.detail = detail
+        self.log_level = log_level
+
+        super().__init__(original, detail, log_level)
+
+
+async def process_request(
+        client: httpx.AsyncClient,
+        method: HTTPMethodField,
+        uri: str,
+        ip: str | None = None,
+) -> Response:
+    try:
+        if ip is None:
+            return await client.request(
+                method, httpx.URL(
+                    scheme="https",
+                    host=uri,
+                    path="/",
+                ),
+            )
+        else:
+            return await client.request(
+                method, httpx.URL(
+                    scheme="https",
+                    host=ip,
+                    path="/",
+                ),
+                headers={
+                    "host": uri,
+                },
+                extensions=dict(
+                    sni_hostname=uri,
+                ),
+            )
+    except httpx.TransportError as e:
+        logger.warning(f"Transport error for {uri=} - {e}")
+        raise HTTPResolveError(
+            e, f"SSL error: `{e}`",
+            logging.DEBUG,
+        )
+    except ssl.SSLError as e:
+        raise HTTPResolveError(
+            e,f"SSL error: `{e}`",
+            logging.DEBUG,
+        )
+    except httpx.TooManyRedirects as e:
+        raise HTTPResolveError(
+            e, f"Too many redirects (limit is {config.app.http.max_redirects})",
+            logging.DEBUG,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPResolveError(
+            e,f"Unknown HTTP error: {e.__class__.__name__}: `{e}`",
+            logging.ERROR,
+        )
+
+
 async def discover_uri(
         transport: httpx.AsyncHTTPTransport,
         uri: str,
@@ -86,6 +148,7 @@ async def discover_uri(
     async with httpx.AsyncClient(
         transport=transport,
         follow_redirects=True,
+        max_redirects=config.app.http.max_redirects,
     ) as client:
         # redirects in general can't be optimized to be parallel etc.
         #  the only external optimisation is possible if domain name
@@ -99,9 +162,11 @@ async def discover_uri(
             ips = list(ips)
 
         response = None
+        resolve_error = None
+
         if config.app.http.use_manual_dns:
             if ips is None:
-                logger.debug(f"IPS if none so skip HTTP for {uri}")
+                logger.debug(f"IPS if none so skip HTTP for {uri=}")
                 return HTTPResult(
                     method=method,
                     status_code=None,
@@ -109,50 +174,33 @@ async def discover_uri(
                     content=None,
                     redirects=None,
                 )
-
             for i in ips:
-                logger.debug(f"Try ip {i} for {uri}")
+                logger.debug(f"Try ip {i} for {uri=}")
                 try:
-                    response = await client.request(
-                        method, httpx.URL(
-                            scheme="https",
-                            host=i,
-                            path="/",
-                        ),
-                        headers={
-                            "host": uri,
-                        },
-                        extensions=dict(
-                            sni_hostname=uri,
-                        ),
+                    response = await process_request(
+                        client=client,
+                        method=method,
+                        uri=uri,
+                        ip=i,
                     )
-                except httpx.TransportError as e:
-                    logger.warning(f"Transport error for {uri} - {e}")
+                except HTTPResolveError as e:
+                    resolve_error = e
                     if config.app.http.try_all_ips:
                         continue
-                    break
-                except ssl.SSLError as e:
-                    # todo: any error markers?
-                    logger.warning(f"SSL error for {uri} - {e}")
-                    pass
+                    else:
+                        break
                 else:
                     break
-            else:
-                logger.warning(f"Not one ip from {ips} not work for {uri}")
         else:
             try:
-                response = await client.request(
-                    method, httpx.URL(
-                        scheme="https",
-                        host=uri,
-                        path="/",
-                    ),
+                response = process_request(
+                    client=client,
+                    method=method,
+                    uri=uri,
+                    ip=None,
                 )
-            except httpx.TransportError:
-                pass
-            except ssl.SSLError:
-                # todo: any error markers?
-                pass
+            except HTTPResolveError as e:
+                resolve_error = e
 
         if response is None:
             return HTTPResult(
@@ -161,6 +209,7 @@ async def discover_uri(
                 content_length=None,
                 content=None,
                 redirects=None,
+                detail=resolve_error is not None and resolve_error.detail,
             )
         content = await response.aread()
         return HTTPResult(
