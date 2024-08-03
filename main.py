@@ -48,7 +48,7 @@ class CheckerFeedRequest(BaseModel):
 
 
 class CheckerFeedResponse(BaseModel):
-    pass
+    queued_count: int
 
 
 class CheckerConsumeResponse(BaseModel):
@@ -69,6 +69,7 @@ async def ping_feed(
         await dns_resolver.kiq(payload=payload)
 
     return CheckerFeedResponse(
+        queued_count=len(payload.uris),
     )
 
 
@@ -80,7 +81,7 @@ async def feed_requests(
         payload: UploadFile,
 ):
     text = await payload.read()
-    uris = text.splitlines()
+    uris = list(filter(None, map(lambda x: x.strip(), text.splitlines())))
     internal_payload = CheckerFeedRequest(
         uris=uris,
     )
