@@ -14,6 +14,7 @@ class CheckURIsRequest(BaseModel):
 class DNSResult(BaseModel):
     status: int
     ips: list[str] | None
+    detail: str | None = None
 
 
 class HTTPResult(BaseModel):
@@ -22,6 +23,7 @@ class HTTPResult(BaseModel):
     content_length: int | None
     content: str | None = None
     redirects: list[tuple[int, str]] | None
+    detail: str | None = None
 
 
 class URICheckReport(BaseModel):

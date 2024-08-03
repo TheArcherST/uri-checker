@@ -3,7 +3,7 @@ from typing import Annotated
 import logging
 
 import aiodns
-from idna import InvalidCodepoint
+from idna import InvalidCodepoint, IDNAError
 from taskiq import (
     TaskiqDepends,
     Context,
@@ -65,6 +65,16 @@ async def dns_resolver(
             logger.error(
                 f"Domain name {i.uri} not handled because of "
                 f" domain name is invalid: {e}"
+            )
+        except Exception as e:
+            i.dns = DNSResult(
+                status=-2,
+                ips=None,
+            )
+            finished_reports.append(i)
+            logger.error(
+                f"Domain name {i.uri} not handled due unknown error: "
+                f"{e.__class__.__name__}: `{e}`"
             )
         else:
             tasks.append(task)

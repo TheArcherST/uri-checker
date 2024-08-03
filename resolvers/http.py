@@ -137,6 +137,11 @@ async def process_request(
             e,f"Unknown HTTP error: {e.__class__.__name__}: `{e}`",
             logging.ERROR,
         )
+    except Exception as e:
+        raise HTTPResolveError(
+            e,f"Unknown error: {e.__class__.__name__}: `{e}`",
+            logging.ERROR,
+        )
 
 
 async def discover_uri(
