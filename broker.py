@@ -24,7 +24,6 @@ class URICheckReportsRegistryMiddleware(taskiq.TaskiqMiddleware):
     ) -> "Union[None, Coroutine[Any, Any, None]]":
         if result is None:
             return
-        print(message, result)
         await redis.lpush(CONSUME_QUEUE_KEY, message.task_id)
 
 
