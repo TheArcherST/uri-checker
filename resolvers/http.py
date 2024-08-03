@@ -214,7 +214,7 @@ async def discover_uri(
                 content_length=None,
                 content=None,
                 redirects=None,
-                detail=resolve_error is not None and resolve_error.detail,
+                detail=resolve_error and resolve_error.detail,
             )
         content = await response.aread()
         return HTTPResult(

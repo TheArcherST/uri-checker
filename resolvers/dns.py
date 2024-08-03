@@ -60,6 +60,7 @@ async def dns_resolver(
             i.dns = DNSResult(
                 status=-1,
                 ips=None,
+                detail="Domain name is invalid",
             )
             finished_reports.append(i)
             logger.error(
@@ -70,6 +71,7 @@ async def dns_resolver(
             i.dns = DNSResult(
                 status=-2,
                 ips=None,
+                detail=f"Unknown error: {e}",
             )
             finished_reports.append(i)
             logger.error(
