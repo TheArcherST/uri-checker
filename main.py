@@ -56,6 +56,11 @@ class CheckerConsumeResponse(BaseModel):
     pending: int
 
 
+class GetVitialsResponse(BaseModel):
+    pending_consume: int
+
+
+
 @app.post(
     "/checker/feed",
     response_model=CheckerFeedResponse,
@@ -111,6 +116,21 @@ async def apply_consume(
         await redis.decrby(RedisKeys.CONSUME_QUEUE_ITEMS_COUNT, consumed_items_count)
     finally:
         await consume_lock.release()
+
+
+@app.get(
+    "/vitials",
+    response_model=GetVitialsResponse,
+)
+async def consume_responses(
+):
+    pending_consume = await redis.get(RedisKeys.CONSUME_QUEUE_ITEMS_COUNT)
+    if pending_consume is None:
+        pending_consume = "0"
+
+    return GetVitialsResponse(
+        pending_consume=pending_consume,
+    )
 
 
 @app.post(
