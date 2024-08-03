@@ -131,7 +131,7 @@ async def discover_uri(
                     if config.app.http.try_all_ips:
                         continue
                     break
-                except ssl.SSLError:
+                except ssl.SSLError as e:
                     # todo: any error markers?
                     logger.warning(f"SSL error for {uri} - {e}")
                     pass
