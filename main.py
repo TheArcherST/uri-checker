@@ -119,7 +119,7 @@ async def apply_consume(
 
 
 @app.get(
-    "/resolver/status",
+    "/checker/status",
     response_model=GetStatusResponse,
 )
 async def get_status(
@@ -134,7 +134,7 @@ async def get_status(
 
 
 @app.post(
-    "/resolver/consume",
+    "/checker/consume",
     response_model=CheckerConsumeResponse,
 )
 async def consume_responses(
