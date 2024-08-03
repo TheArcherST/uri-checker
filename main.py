@@ -134,7 +134,7 @@ async def get_status(
 
 
 @app.post(
-    "/ping/consume",
+    "/resolver/consume",
     response_model=CheckerConsumeResponse,
 )
 async def consume_responses(
