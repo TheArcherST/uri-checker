@@ -129,7 +129,6 @@ async def get_dumps_list(
 
 @app.get(
     "/resolver/flush-plugin/data/{filename}",
-    response_model=list[str],
 )
 async def get_dump(
         filename: str,
