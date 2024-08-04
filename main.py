@@ -143,7 +143,6 @@ async def get_dump(
 
 @app.delete(
     "/resolver/flush-plugin/data/{filename}",
-    response_model=list[str],
 )
 async def delete_dump(
         filename: str,
