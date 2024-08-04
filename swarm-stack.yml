@@ -1,7 +1,7 @@
 services:
   taskiq-worker:
     image: 127.0.0.1:5000/uri-checker-taskiq-worker
-    command: taskiq worker main:broker
+    command: taskiq worker main:broker --max-async-tasks=50 --log-level=WARNING
     deploy:
       replicas: 2
   registry:

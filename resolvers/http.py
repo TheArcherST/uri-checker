@@ -221,16 +221,25 @@ async def discover_uri(
                 redirects=None,
                 detail=detail,
             )
-        content = await response.aread()
+
+        detail = None
+        text = None
+        try:
+            text = response.text
+        except Exception as e:
+            detail = (f"Error while fetching text rrom content: "
+                      f"{e.__class__.__name__}: `{e}`")
+
         return HTTPResult(
             method=method,
             status_code=response.status_code,
             content_length=response.headers.get("content-length"),
-            content=content.decode() or None,
+            content=text,
             redirects=(
                 [
                     (i.status_code, i.headers.get("location"))
                     for i in response.history
                 ]
             ),
+            detail=detail,
         )
