@@ -95,7 +95,7 @@ async def flush_daemon():
                     tasks,
                     limit=maximum_items,
                 )
-                logger.info(f"Written {len(response.results)} results")
+                logger.info(f"Written {len(response.results)}")
                 for i in tasks.tasks:
                     await i()
 
@@ -305,13 +305,10 @@ async def consume_responses(
         raise
 
 
-global_tasks = []
-
-
 @app.on_event("startup")
 async def on_startup() -> None:
     await broker.startup()
-    global_tasks.append(asyncio.create_task(flush_daemon()))
+    asyncio.create_task(flush_daemon())
 
 
 @app.on_event("shutdown")
