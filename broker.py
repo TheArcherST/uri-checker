@@ -28,6 +28,8 @@ class RedisKeys:
     workers.
     """
 
+    IS_FLUSH_PLUGIN_ENABLED = 'is_flush_plugin_enabled'
+
 
 redis = Redis(
     host=config.redis.host,
@@ -71,6 +73,7 @@ broker = (
         f"redis://{config.redis.host}:{config.redis.port}/1",
         serializer=task_result_serializer,
         timeout=50,
+        result_ex_time=60*60*1,
     ))
     .with_middlewares(URICheckReportsRegistryMiddleware(
     ))

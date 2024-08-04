@@ -1,6 +1,11 @@
+import asyncio
+import os.path
+import uuid
+from datetime import timedelta, datetime
 from itertools import batched
 from typing import Literal
 
+import aiofiles
 import uvicorn
 from fastapi import FastAPI, UploadFile, BackgroundTasks
 from redis.asyncio import Redis
@@ -8,6 +13,7 @@ from logging import getLogger
 
 from pydantic import BaseModel
 from redis.asyncio.lock import Lock
+from starlette.responses import FileResponse
 
 from broker import broker, task_result_serializer, RedisKeys
 from config import config
@@ -42,6 +48,8 @@ redis = Redis(
     db=1,
 )
 
+FLUSH_MOUNTPOINT = "/flush/data"
+
 
 class CheckerFeedRequest(BaseModel):
     uris: list[URIField]
@@ -58,7 +66,83 @@ class CheckerConsumeResponse(BaseModel):
 
 class GetStatusResponse(BaseModel):
     pending_consume: int
+    is_flush_plugin_enabled: bool
 
+
+async def flush_daemon():
+    minimum_items = 5_000
+    maximum_items = 10_000
+
+    while True:
+        is_enabled = await redis.get(RedisKeys.IS_FLUSH_PLUGIN_ENABLED)
+        if is_enabled is None:
+            is_enabled = "0"
+        is_enabled = bool(int(is_enabled))
+
+        if not is_enabled:
+            await asyncio.sleep(1)
+            continue
+
+        current_items = redis.get(RedisKeys.CONSUME_QUEUE_ITEMS_COUNT)
+        if current_items >= minimum_items:
+            async with aiofiles.open(
+                    os.path.join(FLUSH_MOUNTPOINT, str(uuid.uuid4())), 'w'
+            ) as fs:
+                tasks = BackgroundTasks([])
+                response = await consume_responses(
+                    tasks,
+                    limit=maximum_items,
+                )
+                for i in tasks.tasks:
+                    await i()
+
+                await fs.write(response.model_dump_json())
+
+        await asyncio.sleep(0.1)
+
+
+@app.post(
+    "/resolver/flush-plugin/{action}",
+    response_model=GetStatusResponse,
+)
+async def enable(
+        action: Literal["enable", "disable"]
+):
+    await redis.set(RedisKeys.IS_FLUSH_PLUGIN_ENABLED, int(action == "enable"))
+    return await get_status()
+
+
+@app.get(
+    "/resolver/flush-plugin/data",
+    response_model=list[str],
+)
+async def get_dumps_list(
+):
+    return os.listdir(FLUSH_MOUNTPOINT)
+
+
+@app.get(
+    "/resolver/flush-plugin/data/{filename}",
+    response_model=list[str],
+)
+async def get_dump(
+        filename: str,
+):
+    return FileResponse(
+        path=os.path.join(FLUSH_MOUNTPOINT, filename),
+        media_type='application/json',
+        filename=filename,
+    )
+
+
+@app.delete(
+    "/resolver/flush-plugin/data/{filename}",
+    response_model=list[str],
+)
+async def delete_dump(
+        filename: str,
+):
+    os.remove(os.path.join(FLUSH_MOUNTPOINT, filename))
 
 
 @app.post(
@@ -127,9 +211,15 @@ async def get_status(
     pending_consume = await redis.get(RedisKeys.CONSUME_QUEUE_ITEMS_COUNT)
     if pending_consume is None:
         pending_consume = "0"
+    is_flush_plugin_enabled = await redis.get(RedisKeys.IS_FLUSH_PLUGIN_ENABLED)
+    if is_flush_plugin_enabled is None:
+        is_flush_plugin_enabled = False
+    else:
+        is_flush_plugin_enabled = bool(int(is_flush_plugin_enabled))
 
     return GetStatusResponse(
         pending_consume=pending_consume,
+        is_flush_plugin_enabled=is_flush_plugin_enabled,
     )
 
 
@@ -212,9 +302,13 @@ async def consume_responses(
         raise
 
 
+global_tasks = []
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     await broker.startup()
+    global_tasks.append(asyncio.create_task(flush_daemon()))
 
 
 @app.on_event("shutdown")
