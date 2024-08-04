@@ -70,6 +70,7 @@ class GetStatusResponse(BaseModel):
 
 
 async def flush_daemon():
+    logger.info("Start flush daemon")
     minimum_items = 5_000
     maximum_items = 10_000
 
@@ -79,6 +80,7 @@ async def flush_daemon():
             is_enabled = "0"
         is_enabled = bool(int(is_enabled))
 
+        logger.info(f"Is enabled: {is_enabled}")
         if not is_enabled:
             await asyncio.sleep(1)
             continue
@@ -93,6 +95,7 @@ async def flush_daemon():
                     tasks,
                     limit=maximum_items,
                 )
+                logger.info(f"Written {len(response.results)} results")
                 for i in tasks.tasks:
                     await i()
 
