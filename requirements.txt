@@ -10,3 +10,4 @@ uvicorn~=0.30.3
 aiodns~=3.2.0
 python-multipart
 redis~=5.0.7
+aiofiles
