@@ -7,7 +7,7 @@ from typing import Literal
 
 import aiofiles
 import uvicorn
-from fastapi import FastAPI, UploadFile, BackgroundTasks
+from fastapi import FastAPI, UploadFile, BackgroundTasks, HTTPException
 from redis.asyncio import Redis
 from logging import getLogger
 
@@ -147,7 +147,10 @@ async def get_dump(
 async def delete_dump(
         filename: str,
 ):
-    os.remove(os.path.join(FLUSH_MOUNTPOINT, filename))
+    try:
+        os.remove(os.path.join(FLUSH_MOUNTPOINT, filename))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
 
 
 @app.post(
