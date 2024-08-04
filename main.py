@@ -85,7 +85,7 @@ async def flush_daemon():
             await asyncio.sleep(1)
             continue
 
-        current_items = redis.get(RedisKeys.CONSUME_QUEUE_ITEMS_COUNT)
+        current_items = await redis.get(RedisKeys.CONSUME_QUEUE_ITEMS_COUNT)
         if current_items >= minimum_items:
             async with aiofiles.open(
                     os.path.join(FLUSH_MOUNTPOINT, str(uuid.uuid4())), 'w'
