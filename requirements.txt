@@ -1,12 +1,12 @@
 taskiq~=0.11.6
-fastapi~=0.111.1
-pydantic~=2.8.2
-httpx~=0.27.0
+fastapi
+pydantic
+httpx
 taskiq-aio-pika
 aioping
 taskiq-redis
 pydantic-settings
-uvicorn~=0.30.3
+uvicorn
 aiodns~=3.2.0
 python-multipart
 redis~=5.0.7
